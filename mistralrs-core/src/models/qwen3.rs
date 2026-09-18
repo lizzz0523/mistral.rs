@@ -41,6 +41,15 @@ macro_rules! sliding_window {
 }
 
 serde_default_fn!(bool, tie_word_embeddings, false);
+serde_default_fn!(f64, default_rope_theta, 10000.0);
+
+/// RoPE parameters for models that use the nested `rope_parameters` config layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RopeParameters {
+    pub rope_theta: f64,
+    #[serde(default)]
+    pub rope_type: Option<String>,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -53,7 +62,10 @@ pub struct Config {
     pub(crate) hidden_act: Activation,
     pub(crate) max_position_embeddings: usize,
     pub(crate) rms_norm_eps: f64,
+    #[serde(default = "default_rope_theta")]
     pub(crate) rope_theta: f64,
+    #[serde(default)]
+    pub(crate) rope_parameters: Option<RopeParameters>,
     pub(crate) sliding_window: Option<usize>,
     pub(crate) head_dim: Option<usize>,
     pub(crate) quantization_config: Option<QuantizedConfig>,
@@ -67,6 +79,14 @@ impl Config {
     pub(crate) fn head_dim(&self) -> usize {
         self.head_dim
             .unwrap_or(self.hidden_size / self.num_attention_heads)
+    }
+
+    /// Get rope_theta from either the flat field or the nested `rope_parameters`.
+    pub(crate) fn get_rope_theta(&self) -> f64 {
+        self.rope_parameters
+            .as_ref()
+            .map(|p| p.rope_theta)
+            .unwrap_or(self.rope_theta)
     }
 }
 
@@ -438,7 +458,7 @@ impl Model {
             ropes.insert(
                 device.location(),
                 Arc::new(RotaryEmbedding::new(
-                    cfg.rope_theta as f32,
+                    cfg.get_rope_theta() as f32,
                     head_dim,
                     cfg.max_position_embeddings,
                     device,
